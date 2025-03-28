@@ -1,0 +1,11 @@
+__pycache__
+*.csv
+.DS_Store
+*.egg-info
+.taiga-token
+**/*.pkl
+**/*.ipynb
+**/.ipynb_checkpoints
+**/trained_models
+**.json
+!manuscript-figures/*.ipynb
