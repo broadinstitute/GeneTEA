@@ -6,7 +6,7 @@ numba==0.57.1
 scipy== 1.11.1
 scikit-learn==1.4.0
 networkx==3.2.1
-nltk==3.7
+nltk==3.9.1
 matplotlib==3.6
 seaborn==0.12.1
 adjustText==0.8
