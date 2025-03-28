@@ -1,4 +1,4 @@
 #these are additional requirements which are large (shouldn't be in docker) or for eval only
 torch==2.1.0
-transformers==4.46.3
+transformers==4.48.0
 gprofiler-official==1.0.0
