@@ -257,7 +257,7 @@ class Competitors():
             "Enrichr":self.enrichr
         }
 
-    def gprof(self, gene_list):
+    def gprof(self, gene_list, sig=True, max_fdr=0.05, min_genes=2):
         '''
         Query gProfiler's g:GOSt.
         '''
@@ -274,12 +274,16 @@ class Competitors():
                 result["Jaccard Index"] = jaccard_index(
                     result["n Matching Genes in List"], result["n Matching Genes Overall"], len(gene_list)
                 )
+            if sig:
+                return result.loc[
+                    lambda x: x["significant"] & (x["n Matching Genes in List"] >= min_genes if min_genes is not None else True)
+                ].sort_values("FDR").reset_index()
             return result.reset_index()
         except Exception as e:
             print(f"g:GOSt errored on {gene_list}", e)
             return None
         
-    def enrichr(self, gene_list):
+    def enrichr(self, gene_list, sig=True, max_fdr=0.05, min_genes=2):
         '''
         Query Enrichr.
         '''
@@ -289,6 +293,11 @@ class Competitors():
             }).set_index('Term')
             result["Matching Genes in List"] = result["Overlapping genes"].apply(" ".join)
             result = result.loc[~result.index.duplicated(keep="first")].copy()
+            if sig:
+                return result.loc[
+                    lambda x: ((x["FDR"] < max_fdr if max_fdr is not None else True) 
+                                & (x["n Matching Genes in List"] >= min_genes if min_genes is not None else True))
+                ].sort_values(["Rank", "Combined score"], ascending=[True, False]).reset_index()
             return result.reset_index()
         except Exception as e:
             print(f"Enrichr errored on {gene_list}", e)
@@ -298,17 +307,8 @@ class Competitors():
         '''
         Get all queries and filter.
         '''
-        results = {k:self.name_map[k](gene_list) for k in self.names}
-        if not sig: return results
-        return {
-            "g:GOSt":None if results["g:GOSt"] is None else results["g:GOSt"].loc[
-                lambda x: x["significant"] & (x["n Matching Genes in List"] >= min_genes if min_genes is not None else True)
-            ].sort_values("FDR"),
-            "Enrichr":None if results["Enrichr"] is None else results["Enrichr"].loc[
-                lambda x: ((x["FDR"] < max_fdr if max_fdr is not None else True) 
-                            & (x["n Matching Genes in List"] >= min_genes if min_genes is not None else True))
-            ].sort_values(["Rank", "Combined score"], ascending=[True, False])
-        }
+        results = {k:self.name_map[k](gene_list, sig=sig, max_fdr=max_fdr, min_genes=min_genes) for k in self.names}
+        return results
     
     def top_n(self, n=10, results=None, genes=None, max_fdr=0.05, min_genes=2):
         '''
@@ -318,10 +318,7 @@ class Competitors():
         assert not (results is not None and genes is not None), "only one of results or genes must be provided"
         if results is None:
             results = self.query(genes, max_fdr=max_fdr, min_genes=min_genes)
-        return {
-            "g:GOSt":None if results["g:GOSt"] is None else results["g:GOSt"].sort_values("FDR").head(n),
-            "Enrichr":None if results["Enrichr"] is None else results["Enrichr"].sort_values(["Rank", "Combined score"], ascending=[True, False]).head(n)
-        }
+        return {k:v.head(n) if v is not None else None for k,v in results.items()}
 
 
 

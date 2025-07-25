@@ -31,6 +31,10 @@ ORDER_W_GROUPED = ["GeneTEA", "GeneTEA-Grouped", "g:GOSt", "Enrichr"]
 ORDER_W_RANDOM = ORDER+["Random"]
 sns.set_palette(PALETTE)
 
+def add_diag(ax, x,y, **kws):
+    comb = pd.concat([x,y])
+    min_max = (comb.min(), comb.max())
+    ax.plot(min_max, min_max, **kws)
 
 def plot_hairball(coeffs, thresh=0.5, node_kws={}, edge_kws={}, ax=None):
     '''
@@ -146,7 +150,10 @@ def distplot(
         )
 
 
-def plot_examples(ex, tea, comps, path=None, n=10, order=ORDER, palette=PALETTE, gene_map={}, to_color={}, width_ratios=(3,1), figsize=(3.6,4), save_to=None):
+def plot_examples(
+        ex, tea, comps, path=None, n=10, order=ORDER, palette=PALETTE, gene_map={}, to_color={}, 
+        width_ratios=(3,1), figsize=(3.6,4), save_to=None, hide_xlabels=False, grid=True, s=None, loc="lower left"
+    ):
     '''
     Plot an example queries top n terms for GeneTEA and competitors.
     '''
@@ -176,16 +183,20 @@ def plot_examples(ex, tea, comps, path=None, n=10, order=ORDER, palette=PALETTE,
         #plot the scatter
         sns.scatterplot(
             data=term_to_entity.loc[lambda x: x["Count"] > 0], 
-            x="OrderedGene", y="OrderedTerm", ax=axs[i, 0], color=colors[mod]
+            x="OrderedGene", y="OrderedTerm", ax=axs[i, 0], color=colors[mod], s=s
         )
         axs[i, 0].set_xticks(ticks=ordered_genes.values)
         axs[i, 0].set_xticklabels(rotation=90, labels=ordered_genes.index)
         axs[i, 0].set_yticks(ticks=ordered_terms.values)
         axs[i, 0].set_xlabel(None)
         axs[i, 0].set_ylabel(None)
+        if hide_xlabels:
+            axs[i, 0].tick_params(axis='x', labelbottom=False, length=0)
+            axs[i, 0].set_xlabel("Genes")
         axs[i, 0].set_xlim(-0.5, len(ordered_genes)-0.5)
         axs[i, 0].set_ylim(-0.5, len(ordered_terms)-0.5)
-        axs[i, 0].grid(axis="both", alpha=0.2)
+        if grid:
+            axs[i, 0].grid(axis="both", alpha=0.2)
         #plot the bars
         sns.barplot(
             data=to_plot, x="n Matching Genes in List", y="OrderedTerm", 
@@ -208,7 +219,7 @@ def plot_examples(ex, tea, comps, path=None, n=10, order=ORDER, palette=PALETTE,
             name:Rectangle((0, 0), 1, 1, fc=c, fill=True, edgecolor='none', linewidth=0)
             for name, (_, c) in to_color.items()
         })
-        fig.legend(col_labels.values, col_labels.index, loc="lower left", title="Terms Related to")
+        fig.legend(col_labels.values, col_labels.index, loc=loc, title="Terms Related to")
     
     if save_to:
         pd.concat(res).to_csv(save_to)
