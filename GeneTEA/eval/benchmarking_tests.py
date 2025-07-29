@@ -116,8 +116,6 @@ def benchmark_f1_score(databases, tea, competitors=["g:GOSt", "Enrichr"], n_samp
         random_sample = database.loc[lambda x: x.apply(len) < 100].apply(list).sample(
             n_samp, replace=False, random_state=rng.bit_generator
         )
-        # #collect the genes in the sample
-        # genes_in_sample = random_sample.explode().unique()
         #setup the query function based on model
         if name == "GeneTEA":
             query_fn = lambda gs: tea.get_enriched_terms(
@@ -131,8 +129,7 @@ def benchmark_f1_score(databases, tea, competitors=["g:GOSt", "Enrichr"], n_samp
         for i, s in random_sample.items():
             enriched_real[i] = query_fn(s)
             enriched_null[i] = query_fn(list(rng.choice(tea.entities, len(s), replace=False)))
-        #then go through all real/null results and check if any of the terms match those in the sample
-        # col = "Term" if name != "g:GOSt" else "native"
+        #then go through all real/null results and check if any of the terms found
         enriched_real_found = pd.Series({
             k:"real" if v is not None and len(v["Term"]) > 0 else "random" for k,v in enriched_real.items()
         })
