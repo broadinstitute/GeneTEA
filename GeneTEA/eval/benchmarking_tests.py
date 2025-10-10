@@ -8,6 +8,7 @@ from .competitors import Competitors
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModel
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import precision_recall_fscore_support
 
 from .benchmarking_sets import get_benchmarking_sets, subsample_and_combo
 
@@ -96,6 +97,70 @@ def benchmark_false_discovery(tea, competitors=["g:GOSt", "Enrichr"], max_fdr=0.
 
     return false_discoveries
 
+def benchmark_f1_score(databases, tea, competitors=["g:GOSt", "Enrichr"], n_samp=10, n=1, max_fdr=0.05, min_genes=2, random_seed=27):
+    '''
+    Benchmark F1 score by looking for identification of annotated term in real and null (random) gene set.
+    '''
+    t0 = time.time()
+    rng = np.random.default_rng(seed=random_seed)
+
+    #setup competitor models
+    if competitors is not None:
+        competitors = {c:Competitors([c]) for c in competitors}
+    else:
+        competitors = {}
+
+    #helper function to query each model individually
+    def query_real_and_null(database, name):
+        #sample random collection of real gene sets
+        random_sample = database.loc[lambda x: x.apply(len) < 100].apply(list).sample(
+            n_samp, replace=False, random_state=rng.bit_generator
+        )
+        #setup the query function based on model
+        if name == "GeneTEA":
+            query_fn = lambda gs: tea.get_enriched_terms(
+                gs, n=None, max_fdr=max_fdr, min_genes=min_genes,
+                group_subterms=False
+            )
+        else:
+             query_fn = lambda gs: competitors[name].query(gs, max_fdr=max_fdr, min_genes=min_genes)[name]
+        #for each real gene set, query it and a random set of genes the same length
+        enriched_real, enriched_null = {}, {}
+        for i, s in random_sample.items():
+            enriched_real[i] = query_fn(s)
+            enriched_null[i] = query_fn(list(rng.choice(tea.entities, len(s), replace=False)))
+        #then go through all real/null results and check if any of the terms found
+        enriched_real_found = pd.Series({
+            k:"real" if v is not None and len(v["Term"]) > 0 else "random" for k,v in enriched_real.items()
+        })
+        enriched_null_found = pd.Series({
+            k:"real" if v is not None and len(v["Term"]) > 0 else "random" for k,v in enriched_null.items()
+        })
+        #compute the F1 score by comparing if the terms were found in the expected sets
+        preds = pd.concat({
+            "Predicted":pd.concat([enriched_real_found, enriched_null_found]),
+            "True":pd.concat([
+                pd.Series("real", index=enriched_real_found.index), 
+                pd.Series("random", index=enriched_real_found.index)
+            ])
+        }, axis=1)
+        return preds, pd.Series(
+            precision_recall_fscore_support(preds["True"], preds["Predicted"], average="binary", pos_label="real", beta=1)[:-1], 
+            index=["Precision", "Recall", "F1 Score"]
+        )
+            
+    #get number enriched 
+    preds, scores = {}, {}
+    for i in range(n):
+        print(i)
+        preds[i], scores[i] = {}, {}
+        for name in ["GeneTEA"]+list(competitors.keys()):
+            preds[i][name], scores[i][name] = query_real_and_null(databases[name], name)
+    scores = pd.concat({k:pd.concat(r, axis=1).T for k, r in scores.items()}).rename_axis(["round", "model"]).reset_index()
+    
+    print(f"took {round((time.time() - t0) / 60, 3)} mins")
+
+    return preds, scores
 
 class MedCPT():
     '''
@@ -205,6 +270,63 @@ class MedCPT():
             "frac_high_redundancy":[None if len(r) == 0 else len([x for x in r if x > 0.95]) / len(r) for r in redundancy],
         }, index=index).rename_axis("model")
         return indiv, joined
+
+def get_max_sem_sim(tea, term, genes, random_state=27, medcpt=None, verbose=False):
+    '''
+    For a term matching a set of genes, find the most semantically similar GeneTEA term with at least one overlapping gene.
+    '''
+    if medcpt is None:
+        medcpt = MedCPT()
+    #find all terms matching one of the genes
+    terms_matching_1 = tea.get_total_info(tea.get_terms_matching_entities(genes).str.split(";").explode().unique(), genes).nlargest(250)
+    #handle edge case where no terms match
+    if len(terms_matching_1) == 0:
+        return None, None
+    #get MedCPT query embeddings for all terms
+    term_emb = medcpt.embed_query(term)
+    terms_matching_1_emb = medcpt.embed_query(terms_matching_1.index.to_list())
+    #also obtain a random sample of terms for null
+    random_emb = medcpt.embed_query(tea.terms.to_series().sample(len(terms_matching_1), random_state=random_state).to_list())
+    #compute cosine similarity
+    matching_cos = pd.DataFrame(cosine_similarity(terms_matching_1_emb, term_emb), index=terms_matching_1.index)[0]
+    if verbose: print(matching_cos.nlargest(50))
+    random_cos = pd.DataFrame(cosine_similarity(random_emb, term_emb))[0]
+    #return the max values
+    return matching_cos.max(), random_cos.max()
+
+def find_sem_similar_terms(databases, tea, n=250, random_seed=27):
+    '''
+    Find the most semantically similar term for random gene sets from the database. Returns the max semantic similarity 
+    for matching terms as well as randomly sampled terms (to use as a null distribution).
+    '''
+    t0 = time.time()
+    rng = np.random.default_rng(seed=random_seed)
+    medcpt = MedCPT()
+
+    #for each database, sample gene sets and find similar terms
+    lengths, sem_sim, sem_sim_null = {}, {}, {}
+    for name, lib in databases.items():
+        print(name, lib.shape)
+        test = lib.set_index("Name")["Genes"].sample(n, random_state=rng.bit_generator)
+        lengths[name], sem_sim[name], sem_sim_null[name] = {}, {}, {}
+        for t, g in test.items():
+            lengths[name][t] = len(g)
+            sem_sim[name][t], sem_sim_null[name][t] = get_max_sem_sim(
+                tea, t, list(g), random_state=rng.bit_generator, medcpt=medcpt
+            )
+    #collate results
+    sem_sim_res = pd.concat({
+        "Matching":pd.DataFrame(sem_sim), 
+        "Random":pd.DataFrame(sem_sim_null)
+    }).stack().rename_axis(["Category", "Gene Set", "Database"]).to_frame("Max Sem Sim").reset_index(level=0)
+    sem_sim_res["Query Len"] = pd.DataFrame(lengths).stack().dropna()
+    sem_sim_res.reset_index(inplace=True)
+    sem_sim_res.loc[lambda x: x["Category"] == "Random", "Database"] = "Random"
+    
+    print(f"took {round((time.time() - t0) / 60, 3)} mins")
+    
+    return sem_sim_res
+
 
 def benchmark_w_medcpt(
     tea, gene_sets, competitors=["g:GOSt", "Enrichr"], TEA="GeneTEA", use_groups=True,
