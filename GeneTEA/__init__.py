@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
-from itertools import cycle, chain
+from itertools import chain
 import textwrap
 import dill
 import sys
 import difflib
+import traceback
 
 import networkx as nx
 from nltk import everygrams
@@ -526,22 +527,26 @@ class xTEA(object):
             #concatenate sentences
             if len(entity_excerpts) > 0:
                 entity_excerpts = entity_excerpts.groupby("Source")["Text"].apply(lambda x: "...".join(x))
-                #highlight if desired
-                if html:
-                    entity_excerpts = entity_excerpts.index.to_series().apply(
-                        lambda x: self.corpus.get_source_href(x, entity=g)
-                    )+": "+entity_excerpts.values
-                    #find terms to highlight in excerpts
-                    if self.check_if_synonym(term):
-                        terms_to_highlight = self.synonyms[term]
-                    else: 
-                        terms_to_highlight = [term]
-                    for t in sorted(terms_to_highlight, key=len):
-                        entity_excerpts = entity_excerpts.apply(
-                            lambda x: subterm_id(t, x, sub_with=fr"{highlight_with[0]}\g<0>{highlight_with[1]}")
-                        )
-                else:
-                    entity_excerpts = entity_excerpts.index.to_series()+": "+entity_excerpts.values 
+                try:
+                    #highlight if desired
+                    if html:
+                        entity_excerpts = entity_excerpts.index.to_series().apply(
+                            lambda x: self.corpus.get_source_href(x, entity=g)
+                        )+": "+entity_excerpts.values
+                        #find terms to highlight in excerpts
+                        if self.check_if_synonym(term):
+                            terms_to_highlight = self.synonyms[term]
+                        else: 
+                            terms_to_highlight = [term]
+                        for t in sorted(terms_to_highlight, key=len):
+                            entity_excerpts = entity_excerpts.apply(
+                                lambda x: subterm_id(t, x, sub_with=fr"{highlight_with[0]}\g<0>{highlight_with[1]}")
+                            )
+                    else:
+                        entity_excerpts = entity_excerpts.index.to_series()+": "+entity_excerpts.values 
+                except Exception as e:
+                    print("failed to format as html, with Exception", e)
+                    traceback.print_exc()
                 excerpts[g] = " | ".join(entity_excerpts)
         #add index name
         excerpts.index.name = self.ENTITY_TYPE
