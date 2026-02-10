@@ -1,7 +1,7 @@
 #python 3.9
 numpy==1.21.6
 pandas==1.1.5
-pyarrow==10.0.0
+pyarrow==14.0.1
 numba==0.57.1
 scipy== 1.11.1
 scikit-learn==1.4.0
